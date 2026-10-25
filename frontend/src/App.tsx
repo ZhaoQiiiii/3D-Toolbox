@@ -58,6 +58,31 @@ export function App() {
   // already be cached, so the Suspense fallback alone would not always
   // appear; the canvas is also shared, making the switch near-instant).
   const [switching, setSwitching] = useState(false);
+  // H toggles every floating panel of the active mode. Kept local (not
+  // persisted): it is a momentary view, not a saved preference.
+  const [panelsHidden, setPanelsHidden] = useState(false);
+
+  // H toggles the mode's floating panels; typing "h" in a form field must not.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== "h") return;
+      if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+      const el = e.target as HTMLElement | null;
+      if (
+        el &&
+        (el.tagName === "INPUT" ||
+          el.tagName === "TEXTAREA" ||
+          el.tagName === "SELECT" ||
+          el.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      setPanelsHidden((v) => !v);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   const switchMode = useCallback(
     (id: AppMode) => {
@@ -84,7 +109,9 @@ export function App() {
 
   return (
     <div style={{ width: "100%", height: "100%", position: "relative", background: "#0b0b12" }}>
-      <style>{`.mode-overlay > * { pointer-events: auto; }`}</style>
+      <style>{`.mode-overlay > * { pointer-events: auto; }${
+        panelsHidden ? " .mode-overlay > * { display: none !important; }" : ""
+      }`}</style>
 
       {/* The persistent render surface shared by all three modes. */}
       <Canvas
@@ -95,18 +122,20 @@ export function App() {
         <CanvasSlot />
       </Canvas>
 
-      <div style={switcherStyle}>
-        {MODE_LABELS.map(({ id, label }) => (
-          <button
-            key={id}
-            style={id === mode ? activeBtnStyle : btnStyle}
-            onClick={() => switchMode(id)}
-            title={`切换到${label}模式`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      {!panelsHidden && (
+        <div style={switcherStyle}>
+          {MODE_LABELS.map(({ id, label }) => (
+            <button
+              key={id}
+              style={id === mode ? activeBtnStyle : btnStyle}
+              onClick={() => switchMode(id)}
+              title={`切换到${label}模式`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
 
       <Suspense fallback={<div style={loadingOverlayStyle}>Loading...</div>}>
         {mode === "bbox" ? (
