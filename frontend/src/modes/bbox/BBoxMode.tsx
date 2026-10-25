@@ -385,17 +385,17 @@ function Picker({
 function Scene({
   positions,
   pointSize,
-  handleRadius,
   lineWidth,
-  opacity,
   boxes,
   activeId,
   placing,
+  editing,
   draftMin,
   anchorZRef,
   renderMode,
   gridSize,
   showAxes,
+  showLabels,
   colorScheme,
   cloudOpacity,
   splatSrc,
@@ -409,17 +409,17 @@ function Scene({
 }: {
   positions: Float32Array | null;
   pointSize: number;
-  handleRadius: number;
   lineWidth: number;
-  opacity: number;
   boxes: BBoxItem[];
   activeId: string | null;
   placing: boolean;
+  editing: boolean;
   draftMin: Vec3 | null;
   anchorZRef: React.MutableRefObject<number>;
   renderMode: RenderMode;
   gridSize: number;
   showAxes: boolean;
+  showLabels: boolean;
   colorScheme: PcdColorScheme;
   cloudOpacity: number;
   splatSrc: string | null;
@@ -447,6 +447,9 @@ function Scene({
   }, [placing]);
 
   const draftColor = colorForIndex(boxes.length);
+  // Corner dots slightly larger than the edge radius (lineWidth / 2), so they
+  // follow the line-thickness slider instead of being a separate setting.
+  const handleRadius = lineWidth * 0.75;
 
   // Rendered into the shared persistent canvas (App level) via useCanvasSlot
   // — the canvas (and its WebGL context / GPU resources) survives mode
@@ -482,7 +485,7 @@ function Scene({
           />
         )}
 
-        {boxes.map((box, i) => (
+        {boxes.map((box) => (
           <BBoxLayer
             key={box.id}
             boxId={box.id}
@@ -490,9 +493,8 @@ function Scene({
             max={box.max}
             handleRadius={handleRadius}
             lineWidth={lineWidth}
-            opacity={opacity}
-            color={colorForIndex(i)}
-            active={box.id === activeId}
+            label={box.objectLabel?.trim() || box.label}
+            showLabel={showLabels}
             dragRefs={dragRefs}
           />
         ))}
@@ -511,18 +513,22 @@ function Scene({
           three modes (see shared/fly-camera-controllers.tsx). */}
       <FlyWheelController controlsRef={controlsRef} />
       <LookRotateController controlsRef={controlsRef} />
-      <Picker
-        sceneGroupRef={sceneGroupRef}
-        controlsRef={controlsRef}
-        pointsRef={pointsRef}
-        splatViewerRef={splatViewerRef}
-        dragRefs={dragRefs}
-        anchorZRef={anchorZRef}
-        onPlace={onPlace}
-        onDrag={onDrag}
-        onDragStart={onDragStart}
-        onSelectBox={onSelectBox}
-      />
+      {/* View mode disables the picker entirely: no corner drags, no placing,
+          no box picking — the camera controls keep working. */}
+      {editing && (
+        <Picker
+          sceneGroupRef={sceneGroupRef}
+          controlsRef={controlsRef}
+          pointsRef={pointsRef}
+          splatViewerRef={splatViewerRef}
+          dragRefs={dragRefs}
+          anchorZRef={anchorZRef}
+          onPlace={onPlace}
+          onDrag={onDrag}
+          onDragStart={onDragStart}
+          onSelectBox={onSelectBox}
+        />
+      )}
     </>
   );
 }
@@ -547,9 +553,22 @@ export function BBoxMode() {
     opacity: cloudOpacity,
     setOpacity: setCloudOpacity,
   } = useSceneVisuals();
-  const [handleRadius, setHandleRadius] = useLocalStorageState<number>("handleRadius", 0.12);
   const [lineWidth, setLineWidth] = useLocalStorageState<number>("lineWidth", 0.04);
-  const [opacity, setOpacity] = useLocalStorageState<number>("opacity", 0.08);
+  // Edit / view modes mirror the SceneGraph editor's toolbar: "view" is
+  // read-only (no picker, no tools panel). Unlike SceneGraph, BBox starts in
+  // "edit" because annotating is the primary task here.
+  const [editMode, setEditMode] = useState<"view" | "edit">("edit");
+  // Leaving edit mode must drop any half-placed box, or its draft would stay
+  // on screen with no way to finish it.
+  useEffect(() => {
+    if (editMode === "view") {
+      setPlacing(false);
+      setDraftMin(null);
+    }
+  }, [editMode]);
+  // Show each box's semantic label (objectLabel, falling back to label) above
+  // the box in the 3D view.
+  const [showLabels, setShowLabels] = useLocalStorageState<boolean>("showLabels", true);
 
   // ---- annotation state ----
   // Per-asset edit state, declared before the scene hook: the hook's
@@ -968,17 +987,17 @@ export function BBoxMode() {
     <Scene
       positions={positions}
       pointSize={pointSize}
-      handleRadius={handleRadius}
       lineWidth={lineWidth}
-      opacity={opacity}
       boxes={boxes}
       activeId={activeId}
       placing={placing}
+      editing={editMode === "edit"}
       draftMin={draftMin}
       anchorZRef={anchorZRef}
       renderMode={renderMode}
       gridSize={gridSize}
       showAxes={showAxes}
+      showLabels={showLabels}
       colorScheme={colorScheme}
       cloudOpacity={cloudOpacity}
       splatSrc={renderMode === "3dgs" ? activeUrl : null}
@@ -997,6 +1016,16 @@ export function BBoxMode() {
       className="mode-overlay"
       style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
     >
+      {/* Edit / view toggle — same top-center toolbar as the SceneGraph
+          editor. */}
+      <div style={EDIT_TOOLBAR_STYLE}>
+        <button
+          onClick={() => setEditMode((m) => (m === "edit" ? "view" : "edit"))}
+          style={editMode === "edit" ? EDIT_BTN_ACTIVE_STYLE : EDIT_BTN_STYLE}
+        >
+          {editMode === "edit" ? "Editing" : "Edit"}
+        </button>
+      </div>
       {/* Unified left-side scene panel shared by all three modes: render
           mode and the cloud/splat file list, with this mode's
           visualization parameters in a standalone panel below it. */}
@@ -1035,14 +1064,6 @@ export function BBoxMode() {
             <span style={{ color: "#3498db" }}>◈</span> BBox
           </div>
           <PanelSlider
-            label="角点大小"
-            value={handleRadius}
-            min={0.02}
-            max={0.6}
-            step={0.01}
-            onChange={setHandleRadius}
-          />
-          <PanelSlider
             label="线条粗细"
             value={lineWidth}
             min={0.01}
@@ -1050,42 +1071,61 @@ export function BBoxMode() {
             step={0.01}
             onChange={setLineWidth}
           />
-          <PanelSlider
-            label="不透明度"
-            value={opacity}
-            min={0}
-            max={1}
-            step={0.01}
-            onChange={setOpacity}
-          />
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              marginTop: 8,
+              cursor: "pointer",
+              fontSize: 13,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={showLabels}
+              onChange={(e) => setShowLabels(e.target.checked)}
+              style={{ accentColor: "#3498db" }}
+            />
+            <span>物体标签</span>
+          </label>
+          <button
+            onClick={() => setShowAxes(!showAxes)}
+            style={{ ...EDIT_BTN_STYLE, width: "100%", marginTop: 8 }}
+          >
+            {showAxes ? "隐藏坐标轴" : "显示坐标轴"}
+          </button>
         </div>
       </div>
 
-      {/* Mode tools on the right: the bounding-box list and editors. */}
-      <div style={TOOLS_COLUMN_STYLE}>
-        <BBoxPanel
-          boxes={boxes}
-          activeId={activeId}
-          placing={placing}
-          cornerMin={activeBox?.min ?? null}
-          cornerMax={activeBox?.max ?? null}
-          center={center}
-          size={size}
-          saveState={saveState}
-          copied={copied}
-          hasAsset={!!activeName}
-          onSetMin={handleSetMin}
-          onSetMax={handleSetMax}
-          onBeginEdit={beginPanelEdit}
-          onReset={handleReset}
-          onSave={handleSave}
-          onCopy={handleCopy}
-          onNewBox={handleNewBox}
-          onSelectBox={handleSelectBox}
-          onRename={handleRename}
-          onDeleteBox={handleDelete}
-        />
-      </div>
+      {/* Mode tools on the right: the bounding-box list and editors. Hidden in
+          view mode, matching SceneGraph's tools column. */}
+      {editMode === "edit" && (
+        <div style={TOOLS_COLUMN_STYLE}>
+          <BBoxPanel
+            boxes={boxes}
+            activeId={activeId}
+            placing={placing}
+            cornerMin={activeBox?.min ?? null}
+            cornerMax={activeBox?.max ?? null}
+            center={center}
+            size={size}
+            saveState={saveState}
+            copied={copied}
+            hasAsset={!!activeName}
+            onSetMin={handleSetMin}
+            onSetMax={handleSetMax}
+            onBeginEdit={beginPanelEdit}
+            onReset={handleReset}
+            onSave={handleSave}
+            onCopy={handleCopy}
+            onNewBox={handleNewBox}
+            onSelectBox={handleSelectBox}
+            onRename={handleRename}
+            onDeleteBox={handleDelete}
+          />
+        </div>
+      )}
 
       {renderMode === "pointcloud" && cloudLoading && (
         <div
@@ -1161,3 +1201,39 @@ export function BBoxMode() {
     </div>
   );
 }
+
+// Edit / view toolbar, styled to match the SceneGraph editor's top-center bar.
+const EDIT_TOOLBAR_STYLE: React.CSSProperties = {
+  position: "absolute",
+  top: 16,
+  left: "50%",
+  transform: "translateX(-50%)",
+  zIndex: 10,
+  background: "rgba(0,0,0,0.85)",
+  borderRadius: 8,
+  padding: "8px 16px",
+  display: "flex",
+  alignItems: "center",
+  gap: 12,
+  fontFamily: "monospace",
+  fontSize: 14,
+  userSelect: "none",
+};
+
+const EDIT_BTN_STYLE: React.CSSProperties = {
+  background: "rgba(255,255,255,0.08)",
+  border: "1px solid rgba(255,255,255,0.15)",
+  borderRadius: 4,
+  color: "#ccc",
+  padding: "5px 14px",
+  cursor: "pointer",
+  fontFamily: "monospace",
+  fontSize: 14,
+};
+
+const EDIT_BTN_ACTIVE_STYLE: React.CSSProperties = {
+  ...EDIT_BTN_STYLE,
+  background: "rgba(52,152,219,0.3)",
+  border: "1px solid rgba(52,152,219,0.5)",
+  color: "#3498db",
+};

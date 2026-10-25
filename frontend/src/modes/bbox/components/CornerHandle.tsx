@@ -12,6 +12,10 @@ interface Props {
   dragRefs: React.MutableRefObject<DragEntry[]>;
 }
 
+/** Invisible grab sphere. Decoupled from the drawn radius so small corner
+ *  dots stay easy to hit and drag. */
+const PICK_RADIUS = 0.08;
+
 /**
  * A single draggable corner sphere, registered into the shared `dragRefs`
  * registry with its box id and corner face-pairs so the Picker can map a drag
@@ -33,9 +37,15 @@ export function CornerHandle({ boxId, corner, position, radius, color, dragRefs 
   );
 
   return (
-    <mesh ref={setRef} position={position}>
-      <sphereGeometry args={[radius, 20, 20]} />
-      <meshBasicMaterial color={color} />
-    </mesh>
+    <group position={position}>
+      <mesh raycast={() => {}}>
+        <sphereGeometry args={[radius, 20, 20]} />
+        <meshBasicMaterial color={color} />
+      </mesh>
+      <mesh ref={setRef}>
+        <sphereGeometry args={[PICK_RADIUS, 8, 8]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+    </group>
   );
 }

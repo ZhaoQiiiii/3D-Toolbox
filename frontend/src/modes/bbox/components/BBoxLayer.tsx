@@ -1,14 +1,11 @@
 import * as THREE from "three";
+import { Html } from "@react-three/drei";
 import type { DragEntry, Vec3 } from "../lib/bbox";
 import {
-  INACTIVE_EDGE_COLOR,
-  INACTIVE_FILL_FACTOR,
-  INACTIVE_HANDLE_COLOR,
   MIN_EDGE_RADIUS,
   boxEdges,
   centerOf,
   cornerPositions,
-  sizeOf,
 } from "../lib/bbox";
 import { CornerHandle } from "./CornerHandle";
 
@@ -18,9 +15,9 @@ interface Props {
   max: Vec3;
   handleRadius: number;
   lineWidth: number;
-  opacity: number;
-  color: string;
-  active: boolean;
+  /** Semantic label shown above the box (null / empty hides it). */
+  label: string | null;
+  showLabel: boolean;
   dragRefs: React.MutableRefObject<DragEntry[]>;
 }
 
@@ -59,8 +56,8 @@ export function EdgeCylinder({
 }
 
 /**
- * Renders a single labelled AABB: 12 edge cylinders, a semi-transparent fill
- * (visual only) and 8 draggable corner spheres.
+ * Renders a single labelled AABB: 12 white edge cylinders, white corner
+ * spheres and a label. No face fill.
  */
 export function BBoxLayer({
   boxId,
@@ -68,20 +65,19 @@ export function BBoxLayer({
   max,
   handleRadius,
   lineWidth,
-  opacity,
-  color,
-  active,
+  label,
+  showLabel,
   dragRefs,
 }: Props) {
   const corners = cornerPositions(min, max);
   const edges = boxEdges();
   const radius = Math.max(MIN_EDGE_RADIUS, lineWidth / 2);
   const center = centerOf(min, max);
-  const size = sizeOf(min, max);
 
-  const edgeColor = active ? color : INACTIVE_EDGE_COLOR;
-  const handleColor = active ? color : INACTIVE_HANDLE_COLOR;
-  const fillOpacity = active ? opacity : opacity * INACTIVE_FILL_FACTOR;
+  // Every box renders in the same look, selected or not: white edges and
+  // corners, no fill.
+  const edgeColor = "#ffffff";
+  const handleColor = "#ffffff";
 
   return (
     <group>
@@ -95,17 +91,6 @@ export function BBoxLayer({
         />
       ))}
 
-      <mesh position={center}>
-        <boxGeometry args={[size[0], size[1], size[2]]} />
-        <meshBasicMaterial
-          color={color}
-          transparent
-          opacity={fillOpacity}
-          depthWrite={false}
-          side={THREE.DoubleSide}
-        />
-      </mesh>
-
       {corners.map((c, i) => (
         <CornerHandle
           key={i}
@@ -117,6 +102,27 @@ export function BBoxLayer({
           dragRefs={dragRefs}
         />
       ))}
+
+      {showLabel && label && (
+        <Html
+          position={[center[0], center[1], max[2]]}
+          center
+          style={{
+            pointerEvents: "none",
+            whiteSpace: "nowrap",
+            padding: "4px 10px",
+            borderRadius: 5,
+            background: "#000",
+            color: "#fff",
+            fontFamily: "monospace",
+            fontSize: 14,
+            lineHeight: 1.2,
+            userSelect: "none",
+          }}
+        >
+          {label}
+        </Html>
+      )}
     </group>
   );
 }
