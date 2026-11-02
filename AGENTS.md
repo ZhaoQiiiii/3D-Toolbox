@@ -1,4 +1,4 @@
-# AGENTS.md — 3D-ToolBox
+# AGENTS.md — 3D-Toolbox
 
 3D web editor combining three switchable modes (3D bbox annotation, scene-graph
 editing, trajectory visualization) on React Three Fiber / Three.js + 3DGS. This

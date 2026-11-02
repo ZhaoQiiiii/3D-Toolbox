@@ -1,5 +1,5 @@
 /**
- * Vite plugin that adds every HTTP endpoint used by 3D-ToolBox (dual mode).
+ * Vite plugin that adds every HTTP endpoint used by 3D-Toolbox (dual mode).
  *
  * ── Scene layout ──────────────────────────────────────────────────────
  * All initial data is bucketed per scene under scenes/<scene>/:
