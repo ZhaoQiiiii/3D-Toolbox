@@ -4,6 +4,8 @@ export interface TrajPoint {
   y: number;
   z: number;
   yaw_rad: number;
+  /** Seconds since the first sample; absent in legacy files. */
+  t?: number;
 }
 
 export interface TrajectoryData {
@@ -11,10 +13,12 @@ export interface TrajectoryData {
   points: TrajPoint[];
 }
 
-/** A browsable step_* directory. */
+/** A browsable step_* directory or a standalone .json trajectory file. */
 export interface TrajStep {
   name: string;
   path: string;
+  /** True when `path` is a .json file rather than a step_* directory. */
+  isFile?: boolean;
   hasTrajectory: boolean;
   hasVideo: boolean;
 }

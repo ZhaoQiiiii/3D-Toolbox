@@ -205,17 +205,19 @@ export function TrajectoryMode() {
     let cancelled = false;
     setTrajLoading(true);
     setTrajError(null);
-    const base = `/api/traj-file?scene=${encodeURIComponent(scene)}&path=${encodeURIComponent(selectedStep.path)}&name=`;
+    const isFile = selectedStep.isFile === true;
+    const fileUrl = `/api/traj-file?scene=${encodeURIComponent(scene)}&path=${encodeURIComponent(selectedStep.path)}`;
+    const base = `${fileUrl}&name=`;
     (async () => {
       try {
         const [trajResp, promptResp, resultResp] = await Promise.all([
-          fetch(`${base}trajectory.json`),
-          fetch(`${base}prompt.json`).catch(() => null),
-          fetch(`${base}result.json`).catch(() => null),
+          fetch(isFile ? fileUrl : `${base}trajectory.json`),
+          isFile ? Promise.resolve(null) : fetch(`${base}prompt.json`).catch(() => null),
+          isFile ? Promise.resolve(null) : fetch(`${base}result.json`).catch(() => null),
         ]);
         if (cancelled) return;
         if (!trajResp.ok) {
-          throw new Error(`trajectory.json: HTTP ${trajResp.status}`);
+          throw new Error(`${selectedStep.name}: HTTP ${trajResp.status}`);
         }
         const trajData = (await trajResp.json()) as TrajectoryData;
         if (cancelled) return;
@@ -269,14 +271,25 @@ export function TrajectoryMode() {
   // would be a side effect in a function React requires to be pure
   // (StrictMode double-invokes updaters).
   const pointCount = traj?.points.length ?? 0;
+  const points = traj?.points;
+  const hasTimestamps = useMemo(
+    () =>
+      !!points &&
+      points.length > 1 &&
+      points.every((p) => typeof p.t === "number" && Number.isFinite(p.t)),
+    [points],
+  );
   useEffect(() => {
-    if (!playing || pointCount === 0) return;
-    const id = window.setInterval(
+    if (!playing || pointCount < 2 || playIndex >= pointCount - 1) return;
+    const dt = hasTimestamps
+      ? Math.min(5, Math.max(0, points![playIndex + 1]!.t! - points![playIndex]!.t!))
+      : 0.5;
+    const id = window.setTimeout(
       () => setPlayIndex((i) => Math.min(i + 1, pointCount - 1)),
-      Math.max(80, 500 / speed),
+      Math.max(8, (dt * 1000) / speed),
     );
-    return () => window.clearInterval(id);
-  }, [playing, pointCount, speed]);
+    return () => window.clearTimeout(id);
+  }, [playing, playIndex, pointCount, speed, hasTimestamps, points]);
 
   useEffect(() => {
     if (playing && pointCount > 0 && playIndex >= pointCount - 1) {

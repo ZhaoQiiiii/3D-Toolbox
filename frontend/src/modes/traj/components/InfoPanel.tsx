@@ -63,6 +63,7 @@ export function InfoPanel({
 }: Props) {
   const assetUrl = (name: string) =>
     `/api/traj-asset?scene=${encodeURIComponent(scene)}&path=${encodeURIComponent(step.path)}&name=${name}`;
+  const isFile = step.isFile === true;
 
   return (
     <div data-overlay style={PANEL}>
@@ -84,31 +85,35 @@ export function InfoPanel({
         </>
       )}
 
-      {/* key on the step so a failed load's display:none resets when the
-          user switches steps; onError hides the broken-image icon for
-          steps that have no anchor.jpg. */}
-      <img
-        key={step.path}
-        src={assetUrl("anchor.jpg")}
-        alt="anchor"
-        onError={(e) => {
-          e.currentTarget.style.display = "none";
-        }}
-        onLoad={(e) => {
-          e.currentTarget.style.display = "block";
-        }}
-        style={{ width: "100%", borderRadius: 4, display: "block", marginTop: 8 }}
-      />
+      {!isFile && (
+        <>
+          {/* key on the step so a failed load's display:none resets when the
+              user switches steps; onError hides the broken-image icon for
+              steps that have no anchor.jpg. */}
+          <img
+            key={step.path}
+            src={assetUrl("anchor.jpg")}
+            alt="anchor"
+            onError={(e) => {
+              e.currentTarget.style.display = "none";
+            }}
+            onLoad={(e) => {
+              e.currentTarget.style.display = "block";
+            }}
+            style={{ width: "100%", borderRadius: 4, display: "block", marginTop: 8 }}
+          />
 
-      {hasVideo && (
-        <video
-          ref={videoRef}
-          src={assetUrl("video.mp4")}
-          muted
-          playsInline
-          preload="metadata"
-          style={{ width: "100%", borderRadius: 4, display: "block", marginTop: 6 }}
-        />
+          {hasVideo && (
+            <video
+              ref={videoRef}
+              src={assetUrl("video.mp4")}
+              muted
+              playsInline
+              preload="metadata"
+              style={{ width: "100%", borderRadius: 4, display: "block", marginTop: 6 }}
+            />
+          )}
+        </>
       )}
 
       <div style={{ borderTop: "1px solid #333", margin: "8px 0 4px" }} />

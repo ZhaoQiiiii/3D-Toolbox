@@ -203,13 +203,16 @@ function trajPathWithin(root: string, p: unknown): p is string {
   return r === root || r.startsWith(root + sep);
 }
 
-/** Step availability info for browse listings. */
-function trajStepInfo(dir: string): {
+/** Step availability info for a step_* directory or a standalone .json file. */
+function trajStepInfo(target: string): {
   name: string;
   path: string;
+  isFile: boolean;
   hasTrajectory: boolean;
   hasVideo: boolean;
 } {
+  const isFile = statSync(target).isFile();
+  const dir = isFile ? dirname(target) : target;
   const has = (f: string) => {
     try {
       statSync(join(dir, f));
@@ -219,10 +222,11 @@ function trajStepInfo(dir: string): {
     }
   };
   return {
-    name: basename(dir),
-    path: dir,
-    hasTrajectory: has("trajectory.json"),
-    hasVideo: has("video.mp4"),
+    name: basename(target),
+    path: target,
+    isFile,
+    hasTrajectory: isFile ? target.endsWith(".json") : has("trajectory.json"),
+    hasVideo: !isFile && has("video.mp4"),
   };
 }
 
@@ -1868,8 +1872,17 @@ export function apiPlugin(): Plugin {
               sendJson(res, 404, { success: false, error: "Path not found" });
               return;
             }
-            if (!st.isDirectory()) {
-              sendJson(res, 400, { success: false, error: "Path is not a directory" });
+            if (st.isFile()) {
+              if (raw.endsWith(".json")) {
+                sendJson(res, 200, {
+                  kind: "step",
+                  path: raw,
+                  root: trajRoot,
+                  step: trajStepInfo(raw),
+                });
+              } else {
+                sendJson(res, 400, { success: false, error: "Path is not a directory" });
+              }
               return;
             }
 
@@ -1879,21 +1892,26 @@ export function apiPlugin(): Plugin {
               return;
             }
 
-            // Only ever list flight_*/step_* entries — no generic listing.
-            const entries = readdirSync(raw, { withFileTypes: true })
+            // Directories follow the flight_*/step_* convention; any *.json
+            // file in the current directory is also a browsable trajectory.
+            const dirents = readdirSync(raw, { withFileTypes: true });
+            const dirs = dirents
               .filter((d) => d.isDirectory())
-              .map((d) => d.name)
-              .filter((n) => n.startsWith("flight_") || n.startsWith("step_"))
-              .sort();
+              .map((d) => d.name);
+            const jsonFiles = dirents
+              .filter((d) => d.isFile() && d.name.endsWith(".json"))
+              .map((d) => d.name);
+            const steps = [
+              ...dirs.filter((n) => n.startsWith("step_")),
+              ...jsonFiles,
+            ].sort();
 
             if (base.startsWith("flight_")) {
               sendJson(res, 200, {
                 kind: "flight",
                 path: raw,
                 root: trajRoot,
-                steps: entries
-                  .filter((n) => n.startsWith("step_"))
-                  .map((n) => trajStepInfo(join(raw, n))),
+                steps: steps.map((n) => trajStepInfo(join(raw, n))),
               });
               return;
             }
@@ -1901,12 +1919,10 @@ export function apiPlugin(): Plugin {
               kind: "dir",
               path: raw,
               root: trajRoot,
-              flights: entries
+              flights: dirs
                 .filter((n) => n.startsWith("flight_"))
                 .map((n) => ({ name: n, path: join(raw, n) })),
-              steps: entries
-                .filter((n) => n.startsWith("step_"))
-                .map((n) => trajStepInfo(join(raw, n))),
+              steps: steps.map((n) => trajStepInfo(join(raw, n))),
             });
           } catch (err: any) {
             sendJson(res, 500, { success: false, error: err.message });
@@ -1926,14 +1942,15 @@ export function apiPlugin(): Plugin {
               req.url || "",
               `http://${req.headers.host || "localhost"}`,
             );
-            const dir = url.searchParams.get("path");
+            const target = url.searchParams.get("path");
             const name = url.searchParams.get("name");
             const trajRoot = trajRootOf(url.searchParams.get("scene"));
+            const isJsonFile =
+              typeof target === "string" && target.endsWith(".json");
             if (
               !trajRoot ||
-              !trajPathWithin(trajRoot, dir) ||
-              !name ||
-              !TRAJ_JSON_FILES.has(name)
+              !trajPathWithin(trajRoot, target) ||
+              (!isJsonFile && (!name || !TRAJ_JSON_FILES.has(name)))
             ) {
               sendJson(res, 400, {
                 success: false,
@@ -1941,7 +1958,7 @@ export function apiPlugin(): Plugin {
               });
               return;
             }
-            const filePath = join(dir, name);
+            const filePath = isJsonFile ? target : join(target, name!);
             let data: string;
             try {
               data = readFileSync(filePath, "utf-8");
