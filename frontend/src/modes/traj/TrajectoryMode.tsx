@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { useThree } from "@react-three/fiber";
-import type { ThreeEvent } from "@react-three/fiber";
 import { OrbitControls, PerspectiveCamera } from "@react-three/drei";
-import * as THREE from "three";
 import { TrajectoryLine } from "./components/TrajectoryLine";
 import { ControlPanel } from "./components/ControlPanel";
 import { InfoPanel } from "./components/InfoPanel";
@@ -24,11 +21,6 @@ import {
   LookRotateController,
 } from "../../shared/fly-camera-controllers";
 import { useSceneVisuals } from "../../shared/use-scene-visuals";
-import {
-  Y_UP,
-  rayHitHorizontalPlane,
-  verticalDragWorld,
-} from "../../shared/lib/projection";
 import type {
   PromptInfo,
   ResultInfo,
@@ -75,13 +67,8 @@ const btnStyle: CSSProperties = {
  * Trajectory browsing is fixed to the project directory (the backend rejects
  * paths outside it); the UI walks worldmodel flight_/step_ directories from
  * that root. A render scene (point cloud or 3DGS) is picked from the shared
- * scenes/ listing and the pi3_local trajectory is overlaid on the scene and
- * can be dragged into place (left button = horizontal, right button =
- * vertical — same convention as the BBox corner handles).
- *
- * trajectory.json is in a per-step LOCAL frame (every step starts at its own
- * origin); nothing in the data relates it to the world frame, so placement
- * is manual by design.
+ * scenes/ listing and the trajectory is overlaid on it at its recorded
+ * coordinates — it is drawn in the world frame and cannot be moved.
  */
 export function TrajectoryMode() {
   // ---- path browsing (fixed to the backend-reported root) ----
@@ -136,9 +123,7 @@ export function TrajectoryMode() {
   const [splatLoading, setSplatLoading] = useState(false);
   const [splatError, setSplatError] = useState<string | null>(null);
 
-  // ---- placement & playback ----
-  const [offset, setOffset] = useState<[number, number, number]>([0, 0, 0]);
-  const [yawDeg, setYawDeg] = useState(0);
+  // ---- playback ----
   const [playIndex, setPlayIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
@@ -229,12 +214,9 @@ export function TrajectoryMode() {
           throw new Error("trajectory.json 缺少 points 数组");
         }
         setTraj(trajData);
-        // Every step starts at its own local origin — reset placement and
-        // playback for the new step.
+        // Rewind playback for the new step.
         setPlayIndex(0);
         setPlaying(false);
-        setOffset([0, 0, 0]);
-        setYawDeg(0);
 
         let promptData: PromptInfo | null = null;
         if (promptResp && promptResp.ok) {
@@ -342,10 +324,7 @@ export function TrajectoryMode() {
       colorScheme={colorScheme}
       cloudOpacity={opacity}
       trajPoints={traj?.points ?? []}
-      offset={offset}
-      yawDeg={yawDeg}
       playIndex={playIndex}
-      setOffset={setOffset}
       onSplatLoadingChange={setSplatLoading}
       onSplatError={setSplatError}
     />,
@@ -398,17 +377,6 @@ export function TrajectoryMode() {
           onNavigate={(path) => {
             void doBrowse(path, scene);
           }}
-          offset={offset}
-          yawDeg={yawDeg}
-          onPlacementChange={(o, y) => {
-            setOffset(o);
-            setYawDeg(y);
-          }}
-          onResetPlacement={() => {
-            setOffset([0, 0, 0]);
-            setYawDeg(0);
-          }}
-          hasTrajectory={pointCount > 0}
         />
 
         {selectedStep && (
@@ -518,172 +486,16 @@ interface TrajSceneProps {
   colorScheme: PcdColorScheme;
   cloudOpacity: number;
   trajPoints: TrajPoint[];
-  offset: [number, number, number];
-  yawDeg: number;
   playIndex: number;
-  setOffset: (o: [number, number, number]) => void;
   onSplatLoadingChange: (loading: boolean) => void;
   onSplatError: (message: string | null) => void;
 }
 
 function TrajScene(p: TrajSceneProps) {
-  const camera = useThree((s) => s.camera);
-  const controls = useThree((s) => s.controls) as
-    | { enabled: boolean }
-    | null;
-  const gl = useThree((s) => s.gl);
   // ONE camera pose across all three modes: restore on mount, track live.
   useSceneCameraPose();
-  const sceneGroupRef = useRef<THREE.Group>(null);
   const controlsRef = useRef<any>(null);
-  const raycaster = useMemo(() => new THREE.Raycaster(), []);
-  const ndc = useMemo(() => new THREE.Vector2(), []);
 
-  const dragRef = useRef<{
-    button: number;
-    startOffset: [number, number, number];
-    startLocal: [number, number, number];
-  } | null>(null);
-  // Ends an in-flight drag (used as the window-listener cleanup). Held in a
-  // ref so unmounting mid-drag still removes the listeners — otherwise the
-  // pointerup that ends the drag never arrives (e.g. release outside the
-  // window) and OrbitControls stays disabled forever.
-  const cancelDragRef = useRef<(() => void) | null>(null);
-  useEffect(() => () => cancelDragRef.current?.(), []);
-
-  const rayFrom = useCallback(
-    (clientX: number, clientY: number) => {
-      const rect = gl.domElement.getBoundingClientRect();
-      ndc.set(
-        ((clientX - rect.left) / rect.width) * 2 - 1,
-        -((clientY - rect.top) / rect.height) * 2 + 1,
-      );
-      raycaster.setFromCamera(ndc, camera as THREE.PerspectiveCamera);
-      return raycaster;
-    },
-    [gl, camera, ndc, raycaster],
-  );
-
-  // Pointer ray → local coords on the horizontal plane through `anchorLocal`
-  // (same pattern as the BBox corner picker).
-  const groundLocalAt = useCallback(
-    (
-      clientX: number,
-      clientY: number,
-      anchorLocal: [number, number, number],
-    ): [number, number, number] | null => {
-      const g = sceneGroupRef.current;
-      if (!g) return null;
-      g.updateWorldMatrix(true, false);
-      camera.updateMatrixWorld();
-      const worldStart = new THREE.Vector3(
-        anchorLocal[0],
-        anchorLocal[1],
-        anchorLocal[2],
-      ).applyMatrix4(g.matrixWorld);
-      const rc = rayFrom(clientX, clientY);
-      const hit = rayHitHorizontalPlane(rc.ray, Y_UP, worldStart);
-      if (!hit) return null;
-      const l = g.worldToLocal(hit.clone());
-      return [l.x, l.y, l.z];
-    },
-    [rayFrom, camera],
-  );
-
-  // Pointer ray → local coords keeping the anchor's X/Y and moving only the
-  // height (vertical drag), with the near-top-down fallback.
-  const verticalLocalAt = useCallback(
-    (
-      clientX: number,
-      clientY: number,
-      anchorLocal: [number, number, number],
-    ): [number, number, number] | null => {
-      const g = sceneGroupRef.current;
-      if (!g) return null;
-      g.updateWorldMatrix(true, false);
-      camera.updateMatrixWorld();
-      const worldStart = new THREE.Vector3(
-        anchorLocal[0],
-        anchorLocal[1],
-        anchorLocal[2],
-      ).applyMatrix4(g.matrixWorld);
-      const rc = rayFrom(clientX, clientY);
-      const w = verticalDragWorld(
-        camera as THREE.PerspectiveCamera,
-        rc.ray,
-        clientX,
-        clientY,
-        gl.domElement.getBoundingClientRect(),
-        worldStart,
-        Y_UP,
-      );
-      if (!w) return null;
-      const l = g.worldToLocal(w);
-      return [l.x, l.y, l.z];
-    },
-    [rayFrom, camera, gl],
-  );
-
-  const handleGrabStart = useCallback(
-    (e: ThreeEvent<PointerEvent>) => {
-      // Left button drags horizontally, right button vertically (same
-      // convention as the BBox corner handles).
-      if (e.button !== 0 && e.button !== 2) return;
-      const g = sceneGroupRef.current;
-      if (!g) return;
-      e.stopPropagation();
-      // Disable OrbitControls for the duration of the drag so the camera
-      // doesn't move together with the trajectory.
-      if (controls) controls.enabled = false;
-      // Capture the pointer on the canvas so releasing it outside the
-      // window still delivers pointerup (which bubbles to the window
-      // listeners below) — without capture the drag would leak.
-      try {
-        gl.domElement.setPointerCapture(e.pointerId);
-      } catch {}
-      const grab = g.worldToLocal(e.point.clone());
-      dragRef.current = {
-        button: e.button,
-        startOffset: [...p.offset] as [number, number, number],
-        startLocal: [grab.x, grab.y, grab.z],
-      };
-
-      const onMove = (ev: PointerEvent) => {
-        const st = dragRef.current;
-        if (!st) return;
-        if (st.button === 0) {
-          const nl = groundLocalAt(ev.clientX, ev.clientY, st.startLocal);
-          if (!nl) return;
-          p.setOffset([
-            st.startOffset[0] + nl[0] - st.startLocal[0],
-            st.startOffset[1] + nl[1] - st.startLocal[1],
-            st.startOffset[2],
-          ]);
-        } else {
-          const nl = verticalLocalAt(ev.clientX, ev.clientY, st.startLocal);
-          if (!nl) return;
-          p.setOffset([
-            st.startOffset[0],
-            st.startOffset[1],
-            st.startOffset[2] + (nl[2] - st.startLocal[2]),
-          ]);
-        }
-      };
-      const endDrag = () => {
-        dragRef.current = null;
-        window.removeEventListener("pointermove", onMove);
-        window.removeEventListener("pointerup", endDrag);
-        window.removeEventListener("pointercancel", endDrag);
-        if (controls) controls.enabled = true;
-        cancelDragRef.current = null;
-      };
-      cancelDragRef.current = endDrag;
-      window.addEventListener("pointermove", onMove);
-      window.addEventListener("pointerup", endDrag);
-      window.addEventListener("pointercancel", endDrag);
-    },
-    [controls, gl, p, groundLocalAt, verticalLocalAt],
-  );
 
   return (
     <>
@@ -708,7 +520,7 @@ function TrajScene(p: TrajSceneProps) {
       <LookRotateController controlsRef={controlsRef} />
       <SceneGrid size={p.gridSize} />
       {/* Z-up local frame (matches the trajectory + cloud conventions). */}
-      <group ref={sceneGroupRef} rotation={[-Math.PI / 2, 0, 0]}>
+      <group rotation={[-Math.PI / 2, 0, 0]}>
         {p.showAxes && <WorldAxes />}
         {p.renderMode === "pointcloud" && p.positions && (
           <PointCloudLayer
@@ -728,13 +540,7 @@ function TrajScene(p: TrajSceneProps) {
           />
         )}
         {p.trajPoints.length > 0 && (
-          <TrajectoryLine
-            points={p.trajPoints}
-            offset={p.offset}
-            yawDeg={p.yawDeg}
-            playIndex={p.playIndex}
-            onGrabStart={handleGrabStart}
-          />
+          <TrajectoryLine points={p.trajPoints} playIndex={p.playIndex} />
         )}
       </group>
     </>

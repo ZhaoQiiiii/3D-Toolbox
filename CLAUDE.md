@@ -36,9 +36,10 @@ Everything below is a verified addition it does not cover.
 
 ## Trajectory mode
 
-- `trajectory.json` is in a per-step local frame (every step starts at its own
-  origin) with no transform to the world frame. Manual placement is by design:
-  left-drag moves horizontally, right-drag vertically. Do not add auto-alignment.
+- Trajectories are drawn at their recorded coordinates and are not movable: the
+  viewer exposes no offset/yaw controls or grab handle. Do not reintroduce
+  manual placement — record the trajectory in the scene's world frame
+  (`frame: "world_zup"`) instead.
 - Browsing is read-only and path-confined by the backend: every requested path
   must stay inside `scenes/<scene>/trajectories/`, and only whitelisted step
   artifacts are readable.
