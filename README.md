@@ -16,7 +16,7 @@
 - **点云按高度着色**：点云支持多种配色方案（Flat / Rainbow / Cool-Warm / Grayscale / X-Ray / Y-Ray，其中 Rainbow / Cool-Warm / Grayscale 按 Z 高度着色）。
 - **共享可视化参数**：三种模式共享同一套场景可视化参数——点大小、栅格尺度、坐标系显示、配色方案与不透明度，跨模式一致、跨会话持久化。
 - **场景图编辑**：节点、区域（Area）、多面体（Poly）与对象（Object）的创建 / 移动 / 重命名 / 删除，以及撤销（`Ctrl/Cmd + Z`）、重做（`Ctrl/Cmd + Shift + Z` / `Ctrl/Cmd + R` / `Ctrl/Cmd + Y`）、连接（`E`）等快捷键，编辑结果可导出为新的场景图快照。
-- **轨迹可视化**：只读浏览 `scenes/<scene>/trajectories/` 下的 worldmodel `flight_*` / `step_*` 目录，查看 `trajectory.json` / `prompt.json` 等结果与 `anchor.jpg` / `video.mp4` 资产。
+- **轨迹可视化**：只读浏览 `scenes/<scene>/trajectories/` 下的任意 `*.json` 轨迹文件（无需特定目录名），以及 worldmodel `flight_*` / `step_*` 目录；查看 `prompt.json` 等结果与 `anchor.jpg` / `video.mp4` 资产。
 - **内置后端 API**：Vite 插件直接在开发服务器中提供场景 / 包围框 / 场景图 / 轨迹相关 REST 接口。
 
 ## 📋 环境要求
@@ -60,7 +60,7 @@ scenes/             # 场景数据桶（默认 gitignore，仅保留 .gitkeep）
     bboxes/                # 包围框标注 (<asset>.json)
     scene_graph_saved/     # 场景图快照（只读来源）
     scene_graph_exported/  # 场景图导出结果
-    trajectories/          # 轨迹数据 (flight_* / step_* 目录)
+    trajectories/          # 轨迹数据 (*.json 文件, 或 flight_* / step_* 目录)
 logs/               # 运行时日志（默认 gitignore）
 plans/              # 设计 / 方案文档（默认 gitignore）
 ```
